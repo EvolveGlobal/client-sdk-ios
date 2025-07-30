@@ -12,10 +12,12 @@ struct VapiMessageContent: Encodable {
 public struct VapiMessage: Encodable {
     public let type: String
     let message: VapiMessageContent
+    public let triggerResponseEnabled: Bool?
 
-    public init(type: String, role: String, content: String) {
+    public init(type: String, role: String, content: String, triggerResponseEnabled: Bool? = nil) {
         self.type = type
         self.message = VapiMessageContent(role: role, content: content)
+        self.triggerResponseEnabled = triggerResponseEnabled
     }
 }
 
