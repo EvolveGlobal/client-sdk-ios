@@ -448,25 +448,8 @@ public final class Vapi: CallClientDelegate {
             let event: Event
             switch appMessage.type {
             case .functionCall:
-                guard let messageDictionary = try JSONSerialization.jsonObject(with: unescapedData, options: []) as? [String: Any] else {
-                    throw VapiError.decodingError(message: "App message isn't a valid JSON object")
-                }
-                
-                guard let functionCallDictionary = messageDictionary["functionCall"] as? [String: Any] else {
-                    throw VapiError.decodingError(message: "App message missing functionCall")
-                }
-                
-                guard let name = functionCallDictionary[FunctionCall.CodingKeys.name.stringValue] as? String else {
-                    throw VapiError.decodingError(message: "App message missing name")
-                }
-                
-                guard let parameters = functionCallDictionary[FunctionCall.CodingKeys.parameters.stringValue] as? [String: Any] else {
-                    throw VapiError.decodingError(message: "App message missing parameters")
-                }
-                
-                
-                let functionCall = FunctionCall(name: name, parameters: parameters)
-                event = Event.functionCall(functionCall)
+                let functionCallMessage = try decoder.decode(FunctionCallMessage.self, from: unescapedData)
+                event = Event.functionCall(functionCallMessage.functionCall)
             case .hang:
                 event = Event.hang
             case .transcript:
