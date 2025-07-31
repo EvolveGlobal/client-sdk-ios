@@ -7,6 +7,58 @@
 
 import Foundation
 
+// Helper struct for encoding/decoding Any values
+public struct AnyCodable: Codable {
+    public let value: Any
+    
+    public init(_ value: Any) {
+        self.value = value
+    }
+    
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        
+        if let stringValue = try? container.decode(String.self) {
+            value = stringValue
+        } else if let intValue = try? container.decode(Int.self) {
+            value = intValue
+        } else if let doubleValue = try? container.decode(Double.self) {
+            value = doubleValue
+        } else if let boolValue = try? container.decode(Bool.self) {
+            value = boolValue
+        } else if let arrayValue = try? container.decode([AnyCodable].self) {
+            value = arrayValue.map { $0.value }
+        } else if let dictionaryValue = try? container.decode([String: AnyCodable].self) {
+            value = dictionaryValue.mapValues { $0.value }
+        } else {
+            throw DecodingError.typeMismatch(Any.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Unsupported type"))
+        }
+    }
+    
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        
+        switch value {
+        case let stringValue as String:
+            try container.encode(stringValue)
+        case let intValue as Int:
+            try container.encode(intValue)
+        case let doubleValue as Double:
+            try container.encode(doubleValue)
+        case let boolValue as Bool:
+            try container.encode(boolValue)
+        case let arrayValue as [Any]:
+            let anyCodableArray = arrayValue.map { AnyCodable($0) }
+            try container.encode(anyCodableArray)
+        case let dictionaryValue as [String: Any]:
+            let anyCodableDictionary = dictionaryValue.mapValues { AnyCodable($0) }
+            try container.encode(anyCodableDictionary)
+        default:
+            throw EncodingError.invalidValue(value, EncodingError.Context(codingPath: encoder.codingPath, debugDescription: "Unsupported type"))
+        }
+    }
+}
+
 public struct FunctionCall: Codable {
     public let name: String
     public let parameters: [String: Any]
@@ -75,60 +127,65 @@ public struct FunctionCall: Codable {
         }
     }
     
-    struct AnyCodable: Codable {
-        let value: Any
-        
-        init(_ value: Any) {
-            self.value = value
-        }
-        
-        init(from decoder: Decoder) throws {
-            let container = try decoder.singleValueContainer()
-            
-            if let stringValue = try? container.decode(String.self) {
-                value = stringValue
-            } else if let intValue = try? container.decode(Int.self) {
-                value = intValue
-            } else if let doubleValue = try? container.decode(Double.self) {
-                value = doubleValue
-            } else if let boolValue = try? container.decode(Bool.self) {
-                value = boolValue
-            } else if let arrayValue = try? container.decode([AnyCodable].self) {
-                value = arrayValue.map { $0.value }
-            } else if let dictionaryValue = try? container.decode([String: AnyCodable].self) {
-                value = dictionaryValue.mapValues { $0.value }
-            } else {
-                throw DecodingError.typeMismatch(Any.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Unsupported type"))
-            }
-        }
-        
-        func encode(to encoder: Encoder) throws {
-            var container = encoder.singleValueContainer()
-            
-            switch value {
-            case let stringValue as String:
-                try container.encode(stringValue)
-            case let intValue as Int:
-                try container.encode(intValue)
-            case let doubleValue as Double:
-                try container.encode(doubleValue)
-            case let boolValue as Bool:
-                try container.encode(boolValue)
-            case let arrayValue as [Any]:
-                let anyCodableArray = arrayValue.map { AnyCodable($0) }
-                try container.encode(anyCodableArray)
-            case let dictionaryValue as [String: Any]:
-                let anyCodableDictionary = dictionaryValue.mapValues { AnyCodable($0) }
-                try container.encode(anyCodableDictionary)
-            default:
-                throw EncodingError.invalidValue(value, EncodingError.Context(codingPath: encoder.codingPath, debugDescription: "Unsupported type"))
-            }
-        }
-    }
+
 }
 
 // Model for the complete function call message structure
 public struct FunctionCallMessage: Codable {
     public let type: String
     public let functionCall: FunctionCall
+}
+
+// Model for tool call item (used in both model-output and tool-calls messages)
+public struct ToolCallItem: Codable {
+    public let id: String
+    public let type: String
+    public let function: ToolCallFunction
+    
+    public struct ToolCallFunction: Codable {
+        public let name: String
+        public let arguments: AnyCodable
+        
+        // Convert arguments to our FunctionCall format
+        public func toFunctionCall() throws -> FunctionCall {
+            let parameters: [String: Any]
+            
+            switch arguments.value {
+            case let dict as [String: Any]:
+                parameters = dict
+            case let string as String:
+                // Handle JSON string arguments
+                if string.isEmpty || string == "{}" {
+                    parameters = [:]
+                } else {
+                    let data = string.data(using: .utf8) ?? Data()
+                    if let jsonObject = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        parameters = jsonObject
+                    } else {
+                        parameters = [:]
+                    }
+                }
+            default:
+                parameters = [:]
+            }
+            
+            return FunctionCall(name: name, parameters: parameters)
+        }
+    }
+}
+
+// Model for model-output messages that contain function calls
+public struct ModelOutputMessage: Codable {
+    public let type: String
+    public let output: [ToolCallItem]
+}
+
+// Model for tool-calls messages  
+public struct ToolCallsMessage: Codable {
+    public let type: String
+    public let toolCalls: [ToolCallItem]
+    
+    // Optional additional fields that might be present
+    public let toolCallList: [ToolCallItem]?
+    public let toolWithToolCallList: [AnyCodable]?
 }

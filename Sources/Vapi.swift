@@ -450,6 +450,26 @@ public final class Vapi: CallClientDelegate {
             case .functionCall:
                 let functionCallMessage = try decoder.decode(FunctionCallMessage.self, from: unescapedData)
                 event = Event.functionCall(functionCallMessage.functionCall)
+            case .modelOutput:
+                let modelOutputMessage = try decoder.decode(ModelOutputMessage.self, from: unescapedData)
+                // Extract function calls from model output
+                if let toolCallItem = modelOutputMessage.output.first(where: { $0.type == "function" }) {
+                    let functionCall = try toolCallItem.function.toFunctionCall()
+                    event = Event.functionCall(functionCall)
+                } else {
+                    let modelOutput = try decoder.decode(ModelOutput.self, from: unescapedData)
+                    event = Event.modelOutput(modelOutput)
+                }
+            case .toolCalls:
+                let toolCallsMessage = try decoder.decode(ToolCallsMessage.self, from: unescapedData)
+                // Extract function calls from tool calls
+                if let toolCallItem = toolCallsMessage.toolCalls.first(where: { $0.type == "function" }) {
+                    let functionCall = try toolCallItem.function.toFunctionCall()
+                    event = Event.functionCall(functionCall)
+                } else {
+                    // If no function calls found, ignore this message for now
+                    return
+                }
             case .hang:
                 event = Event.hang
             case .transcript:
