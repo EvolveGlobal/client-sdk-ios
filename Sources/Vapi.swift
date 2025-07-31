@@ -348,16 +348,40 @@ public final class Vapi: CallClientDelegate {
             return (jsonData, nil)
         }
 
-        // Remove the leading and trailing double quotes
-        let trimmedString = jsonString.trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-        // Replace escaped backslashes
-        let unescapedString = trimmedString.replacingOccurrences(of: "\\\\", with: "\\")
-        // Replace escaped double quotes
-        let unescapedJSON = unescapedString.replacingOccurrences(of: "\\\"", with: "\"")
+        // Check if the string is already valid JSON (not double-encoded)
+        if let _ = try? JSONSerialization.jsonObject(with: jsonData) {
+            // Data is already valid JSON, no unescaping needed
+            return (jsonData, jsonString)
+        }
+        
+        // Check if it's a string wrapped in quotes that needs unescaping
+        if jsonString.hasPrefix("\"") && jsonString.hasSuffix("\"") {
+            // Remove the leading and trailing double quotes
+            let trimmedString = String(jsonString.dropFirst().dropLast())
+            
+            // Try to decode the JSON string using JSONSerialization for proper unescaping
+            if let data = trimmedString.data(using: .utf8),
+               let jsonObject = try? JSONSerialization.jsonObject(with: data),
+               let properData = try? JSONSerialization.data(withJSONObject: jsonObject) {
+                let properString = String(data: properData, encoding: .utf8)
+                return (properData, properString)
+            }
+            
+            // Fallback to manual unescaping if JSONSerialization fails
+            let unescapedString = trimmedString
+                .replacingOccurrences(of: "\\\\", with: "\\")
+                .replacingOccurrences(of: "\\\"", with: "\"")
+                .replacingOccurrences(of: "\\/", with: "/")
+                .replacingOccurrences(of: "\\n", with: "\n")
+                .replacingOccurrences(of: "\\r", with: "\r")
+                .replacingOccurrences(of: "\\t", with: "\t")
+            
+            let unescapedData = unescapedString.data(using: .utf8) ?? jsonData
+            return (unescapedData, unescapedString)
+        }
 
-        let unescapedData = unescapedJSON.data(using: .utf8) ?? jsonData
-
-        return (unescapedData, unescapedJSON)
+        // Return original data if no processing needed
+        return (jsonData, jsonString)
     }
     
     public func startLocalAudioLevelObserver() async throws {
@@ -443,7 +467,17 @@ public final class Vapi: CallClientDelegate {
             
             // Parse the JSON data generically to determine the type of event
             let decoder = JSONDecoder()
-            let appMessage = try decoder.decode(AppMessage.self, from: unescapedData)
+            let appMessage: AppMessage
+            
+            do {
+                appMessage = try decoder.decode(AppMessage.self, from: unescapedData)
+            } catch {
+                print("Failed to decode AppMessage: \(error)")
+                if let debugString = String(data: unescapedData, encoding: .utf8) {
+                    print("JSON that failed to parse: \(debugString.prefix(500))")
+                }
+                throw error
+            }
             // Parse the JSON data again, this time using the specific type
             let event: Event
             switch appMessage.type {
@@ -463,10 +497,17 @@ public final class Vapi: CallClientDelegate {
                         // For now, skip this message since it's not a function call
                         return
                     }
-                } catch {
+                } catch let modelOutputError {
+                    print("Failed to parse as ModelOutputMessage: \(modelOutputError)")
                     // Fall back to original ModelOutput format (string output)
-                    let modelOutput = try decoder.decode(ModelOutput.self, from: unescapedData)
-                    event = Event.modelOutput(modelOutput)
+                    do {
+                        let modelOutput = try decoder.decode(ModelOutput.self, from: unescapedData)
+                        event = Event.modelOutput(modelOutput)
+                    } catch let fallbackError {
+                        print("Failed to parse as ModelOutput fallback: \(fallbackError)")
+                        print("Skipping model-output message that couldn't be parsed")
+                        return
+                    }
                 }
             case .toolCalls:
                 do {
@@ -477,10 +518,14 @@ public final class Vapi: CallClientDelegate {
                         event = Event.functionCall(functionCall)
                     } else {
                         // If no function calls found, ignore this message for now
+                        print("No function calls found in tool-calls message")
                         return
                     }
-                } catch {
-                    print("Failed to parse tool-calls message: \(error)")
+                } catch let toolCallsError {
+                    print("Failed to parse tool-calls message: \(toolCallsError)")
+                    if let debugString = String(data: unescapedData, encoding: .utf8) {
+                        print("Failed tool-calls JSON: \(debugString.prefix(300))")
+                    }
                     return
                 }
             case .hang:
@@ -502,16 +547,23 @@ public final class Vapi: CallClientDelegate {
                     for message in conv.conversation {
                         if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
                             for toolCall in toolCalls where toolCall.type == "function" {
-                                let functionCall = try toolCall.function.toFunctionCall()
-                                // Send function call event
-                                eventSubject.send(.functionCall(functionCall))
+                                do {
+                                    let functionCall = try toolCall.function.toFunctionCall()
+                                    // Send function call event
+                                    eventSubject.send(.functionCall(functionCall))
+                                } catch {
+                                    print("Failed to convert tool call to function call: \(error)")
+                                }
                             }
                         }
                     }
                     
                     event = Event.conversationUpdate(conv)
-                } catch {
-                    print("Failed to parse conversation-update: \(error)")
+                } catch let convError {
+                    print("Failed to parse conversation-update: \(convError)")
+                    if let debugString = String(data: unescapedData, encoding: .utf8) {
+                        print("Failed conversation-update JSON (first 300 chars): \(debugString.prefix(300))")
+                    }
                     // Don't throw - just ignore this message
                     return
                 }
