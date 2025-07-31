@@ -21,6 +21,19 @@ public struct VapiMessage: Encodable {
     }
 }
 
+// Define the function call response structure
+public struct VapiFunctionCallResponse: Encodable {
+    public let type: String
+    public let toolCallId: String
+    public let result: String
+    
+    public init(toolCallId: String, result: String) {
+        self.type = "function-call-result"
+        self.toolCallId = toolCallId
+        self.result = result
+    }
+}
+
 public final class Vapi: CallClientDelegate {
     
     // MARK: - Supporting Types
@@ -164,6 +177,28 @@ public final class Vapi: CallClientDelegate {
           print("Error encoding message to JSON: \(error)")
           throw error // Re-throw the error to be handled by the caller
       }
+    }
+
+    /// Send a function call response back to the assistant
+    /// - Parameters:
+    ///   - toolCallId: The ID of the function call (from FunctionCall.id if available, or extract from logs)
+    ///   - result: The result to send back (can be "Success", "Error", or a descriptive message)
+    public func sendFunctionCallResponse(toolCallId: String, result: String) async throws {
+        let response = VapiFunctionCallResponse(toolCallId: toolCallId, result: result)
+        
+        do {
+            let jsonData = try JSONEncoder().encode(response)
+            
+            // Debugging: Print the response being sent
+            if let jsonString = String(data: jsonData, encoding: .utf8) {
+                print("Sending function call response: \(jsonString)")
+            }
+            
+            try await self.call?.sendAppMessage(json: jsonData, to: .all)
+        } catch {
+            print("Error encoding function call response to JSON: \(error)")
+            throw error
+        }
     }
 
     public func setMuted(_ muted: Bool) async throws {
@@ -490,7 +525,7 @@ public final class Vapi: CallClientDelegate {
                     let modelOutputMessage = try decoder.decode(ModelOutputMessage.self, from: unescapedData)
                     // Extract function calls from model output
                     if let toolCallItem = modelOutputMessage.output.first(where: { $0.type == "function" }) {
-                        let functionCall = try toolCallItem.function.toFunctionCall()
+                        let functionCall = try toolCallItem.toFunctionCall()
                         event = Event.functionCall(functionCall)
                     } else {
                         // No function calls found, but we parsed successfully as ModelOutputMessage
@@ -514,7 +549,7 @@ public final class Vapi: CallClientDelegate {
                     let toolCallsMessage = try decoder.decode(ToolCallsMessage.self, from: unescapedData)
                     // Extract function calls from tool calls
                     if let toolCallItem = toolCallsMessage.toolCalls.first(where: { $0.type == "function" }) {
-                        let functionCall = try toolCallItem.function.toFunctionCall()
+                        let functionCall = try toolCallItem.toFunctionCall()
                         event = Event.functionCall(functionCall)
                     } else {
                         // If no function calls found, ignore this message for now
@@ -548,7 +583,7 @@ public final class Vapi: CallClientDelegate {
                         if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
                             for toolCall in toolCalls where toolCall.type == "function" {
                                 do {
-                                    let functionCall = try toolCall.function.toFunctionCall()
+                                    let functionCall = try toolCall.toFunctionCall()
                                     // Send function call event
                                     eventSubject.send(.functionCall(functionCall))
                                 } catch {
