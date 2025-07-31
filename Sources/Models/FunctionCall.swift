@@ -187,5 +187,27 @@ public struct ToolCallsMessage: Codable {
     
     // Optional additional fields that might be present
     public let toolCallList: [ToolCallItem]?
-    public let toolWithToolCallList: [AnyCodable]?
+    public let toolWithToolCallList: [ToolWithCallItem]?
+    
+    // Additional tool call structure for toolWithToolCallList
+    public struct ToolWithCallItem: Codable {
+        public let type: String?
+        public let function: ToolFunctionDefinition?
+        public let messages: [ToolMessage]?
+        public let toolCall: ToolCallItem?
+        
+        public struct ToolFunctionDefinition: Codable {
+            public let name: String?
+            public let parameters: AnyCodable?
+            public let description: String?
+        }
+        
+        public struct ToolMessage: Codable {
+            public let type: String?
+            public let content: String?
+            public let contents: [AnyCodable]?
+            public let conditions: [AnyCodable]?
+            public let blocking: Bool?
+        }
+    }
 }

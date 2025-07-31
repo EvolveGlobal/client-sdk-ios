@@ -451,23 +451,36 @@ public final class Vapi: CallClientDelegate {
                 let functionCallMessage = try decoder.decode(FunctionCallMessage.self, from: unescapedData)
                 event = Event.functionCall(functionCallMessage.functionCall)
             case .modelOutput:
-                let modelOutputMessage = try decoder.decode(ModelOutputMessage.self, from: unescapedData)
-                // Extract function calls from model output
-                if let toolCallItem = modelOutputMessage.output.first(where: { $0.type == "function" }) {
-                    let functionCall = try toolCallItem.function.toFunctionCall()
-                    event = Event.functionCall(functionCall)
-                } else {
+                // Try to parse as function call format first
+                do {
+                    let modelOutputMessage = try decoder.decode(ModelOutputMessage.self, from: unescapedData)
+                    // Extract function calls from model output
+                    if let toolCallItem = modelOutputMessage.output.first(where: { $0.type == "function" }) {
+                        let functionCall = try toolCallItem.function.toFunctionCall()
+                        event = Event.functionCall(functionCall)
+                    } else {
+                        // No function calls found, but we parsed successfully as ModelOutputMessage
+                        // For now, skip this message since it's not a function call
+                        return
+                    }
+                } catch {
+                    // Fall back to original ModelOutput format (string output)
                     let modelOutput = try decoder.decode(ModelOutput.self, from: unescapedData)
                     event = Event.modelOutput(modelOutput)
                 }
             case .toolCalls:
-                let toolCallsMessage = try decoder.decode(ToolCallsMessage.self, from: unescapedData)
-                // Extract function calls from tool calls
-                if let toolCallItem = toolCallsMessage.toolCalls.first(where: { $0.type == "function" }) {
-                    let functionCall = try toolCallItem.function.toFunctionCall()
-                    event = Event.functionCall(functionCall)
-                } else {
-                    // If no function calls found, ignore this message for now
+                do {
+                    let toolCallsMessage = try decoder.decode(ToolCallsMessage.self, from: unescapedData)
+                    // Extract function calls from tool calls
+                    if let toolCallItem = toolCallsMessage.toolCalls.first(where: { $0.type == "function" }) {
+                        let functionCall = try toolCallItem.function.toFunctionCall()
+                        event = Event.functionCall(functionCall)
+                    } else {
+                        // If no function calls found, ignore this message for now
+                        return
+                    }
+                } catch {
+                    print("Failed to parse tool-calls message: \(error)")
                     return
                 }
             case .hang:
