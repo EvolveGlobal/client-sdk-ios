@@ -495,8 +495,26 @@ public final class Vapi: CallClientDelegate {
                 let metadata = try decoder.decode(Metadata.self, from: unescapedData)
                 event = Event.metadata(metadata)
             case .conversationUpdate:
-                let conv = try decoder.decode(ConversationUpdate.self, from: unescapedData)
-                event = Event.conversationUpdate(conv)
+                do {
+                    let conv = try decoder.decode(ConversationUpdate.self, from: unescapedData)
+                    
+                    // Also check for function calls in conversation updates
+                    for message in conv.conversation {
+                        if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
+                            for toolCall in toolCalls where toolCall.type == "function" {
+                                let functionCall = try toolCall.function.toFunctionCall()
+                                // Send function call event
+                                eventSubject.send(.functionCall(functionCall))
+                            }
+                        }
+                    }
+                    
+                    event = Event.conversationUpdate(conv)
+                } catch {
+                    print("Failed to parse conversation-update: \(error)")
+                    // Don't throw - just ignore this message
+                    return
+                }
             case .statusUpdate:
                 let statusUpdate = try decoder.decode(StatusUpdate.self, from: unescapedData)
                 event = Event.statusUpdate(statusUpdate)
@@ -514,6 +532,25 @@ public final class Vapi: CallClientDelegate {
         } catch {
             let messageText = String(data: jsonData, encoding: .utf8)
             print("Error parsing app message \"\(messageText ?? "")\": \(error.localizedDescription)")
+            
+            // Additional debugging for conversation-update errors
+            if let messageText = messageText, messageText.contains("conversation-update") {
+                print("Detailed conversation-update parsing error: \(error)")
+                if let decodingError = error as? DecodingError {
+                    switch decodingError {
+                    case .typeMismatch(let type, let context):
+                        print("Type mismatch: Expected \(type), path: \(context.codingPath)")
+                    case .valueNotFound(let type, let context):
+                        print("Value not found: \(type), path: \(context.codingPath)")
+                    case .keyNotFound(let key, let context):
+                        print("Key not found: \(key), path: \(context.codingPath)")
+                    case .dataCorrupted(let context):
+                        print("Data corrupted, path: \(context.codingPath)")
+                    @unknown default:
+                        print("Unknown decoding error")
+                    }
+                }
+            }
         }
     }
 }

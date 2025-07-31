@@ -30,6 +30,8 @@ public struct AnyCodable: Codable {
             value = arrayValue.map { $0.value }
         } else if let dictionaryValue = try? container.decode([String: AnyCodable].self) {
             value = dictionaryValue.mapValues { $0.value }
+        } else if container.decodeNil() {
+            value = NSNull()
         } else {
             throw DecodingError.typeMismatch(Any.self, DecodingError.Context(codingPath: decoder.codingPath, debugDescription: "Unsupported type"))
         }
@@ -53,6 +55,8 @@ public struct AnyCodable: Codable {
         case let dictionaryValue as [String: Any]:
             let anyCodableDictionary = dictionaryValue.mapValues { AnyCodable($0) }
             try container.encode(anyCodableDictionary)
+        case is NSNull:
+            try container.encodeNil()
         default:
             throw EncodingError.invalidValue(value, EncodingError.Context(codingPath: encoder.codingPath, debugDescription: "Unsupported type"))
         }
@@ -152,9 +156,10 @@ public struct ToolCallItem: Codable {
             
             switch arguments.value {
             case let dict as [String: Any]:
+                // Arguments is already a dictionary
                 parameters = dict
             case let string as String:
-                // Handle JSON string arguments
+                // Arguments is a JSON string - need to parse it
                 if string.isEmpty || string == "{}" {
                     parameters = [:]
                 } else {
@@ -162,10 +167,17 @@ public struct ToolCallItem: Codable {
                     if let jsonObject = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                         parameters = jsonObject
                     } else {
+                        // If parsing fails, treat as empty parameters
+                        print("Warning: Could not parse function arguments JSON: \(string)")
                         parameters = [:]
                     }
                 }
+            case is NSNull:
+                // Handle null case
+                parameters = [:]
             default:
+                // Handle any other case
+                print("Warning: Unexpected function arguments type: \(type(of: arguments.value))")
                 parameters = [:]
             }
             
