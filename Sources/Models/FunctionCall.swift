@@ -77,61 +77,28 @@ public struct FunctionCall: Codable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         name = try container.decode(String.self, forKey: .name)
         
-        // Decode parameters as a generic JSON object
-        let parametersContainer = try container.nestedContainer(keyedBy: DynamicCodingKeys.self, forKey: .parameters)
-        var decodedParameters: [String: Any] = [:]
-        
-        for key in parametersContainer.allKeys {
-            if let stringValue = try? parametersContainer.decode(String.self, forKey: key) {
-                decodedParameters[key.stringValue] = stringValue
-            } else if let intValue = try? parametersContainer.decode(Int.self, forKey: key) {
-                decodedParameters[key.stringValue] = intValue
-            } else if let doubleValue = try? parametersContainer.decode(Double.self, forKey: key) {
-                decodedParameters[key.stringValue] = doubleValue
-            } else if let boolValue = try? parametersContainer.decode(Bool.self, forKey: key) {
-                decodedParameters[key.stringValue] = boolValue
+        // Decode parameters as AnyCodable and convert
+        if let parametersValue = try? container.decode(AnyCodable.self, forKey: .parameters) {
+            if let dict = parametersValue.value as? [String: Any] {
+                parameters = dict
             } else {
-                // Handle nested objects/arrays as raw JSON
-                let jsonValue = try parametersContainer.decode(AnyCodable.self, forKey: key)
-                decodedParameters[key.stringValue] = jsonValue.value
+                parameters = [:]
             }
+        } else {
+            parameters = [:]
         }
-        
-        parameters = decodedParameters
     }
     
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
         try container.encode(name, forKey: .name)
-        
-        var parametersContainer = encoder.nestedContainer(keyedBy: DynamicCodingKeys.self, forKey: .parameters)
-        
-        for (key, value) in parameters {
-            let codingKey = DynamicCodingKeys(stringValue: key)!
-            let anyCodable = AnyCodable(value)
-            try parametersContainer.encode(anyCodable, forKey: codingKey)
-        }
+        try container.encode(AnyCodable(parameters), forKey: .parameters)
     }
     
     enum CodingKeys: String, CodingKey {
         case name
         case parameters
     }
-    
-    struct DynamicCodingKeys: CodingKey {
-        var stringValue: String
-        var intValue: Int?
-        
-        init?(stringValue: String) {
-            self.stringValue = stringValue
-        }
-        
-        init?(intValue: Int) {
-            return nil
-        }
-    }
-    
-
 }
 
 // Model for the complete function call message structure
@@ -145,6 +112,7 @@ public struct ToolCallItem: Codable {
     public let id: String
     public let type: String
     public let function: ToolCallFunction
+    public let isPrecededByText: Bool?
     
     public struct ToolCallFunction: Codable {
         public let name: String
@@ -177,7 +145,7 @@ public struct ToolCallItem: Codable {
                 parameters = [:]
             default:
                 // Handle any other case
-                print("Warning: Unexpected function arguments type: \(type(of: arguments.value))")
+                print("Warning: Unexpected function arguments type: \(Swift.type(of: arguments.value))")
                 parameters = [:]
             }
             
