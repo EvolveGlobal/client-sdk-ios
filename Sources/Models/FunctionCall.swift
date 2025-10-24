@@ -123,7 +123,13 @@ public struct ToolCallItem: Codable {
     public func toFunctionCall() throws -> FunctionCall {
         let parameters: [String: Any]
         
-        switch function.arguments.value {
+        // Handle optional arguments
+        guard let arguments = function.arguments else {
+            print("⚠️ [SDK] ToolCallItem: No arguments field, using empty parameters")
+            return FunctionCall(id: id, name: function.name, parameters: [:])
+        }
+        
+        switch arguments.value {
         case let dict as [String: Any]:
             parameters = dict
         case let string as String:
@@ -134,14 +140,14 @@ public struct ToolCallItem: Codable {
                 if let jsonObject = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                     parameters = jsonObject
                 } else {
-                    print("Warning: Could not parse function arguments JSON: \(string)")
+                    print("⚠️ [SDK] Could not parse function arguments JSON: \(string)")
                     parameters = [:]
                 }
             }
         case is NSNull:
             parameters = [:]
         default:
-            print("Warning: Unexpected function arguments type: \(Swift.type(of: function.arguments.value))")
+            print("⚠️ [SDK] Unexpected function arguments type: \(Swift.type(of: arguments.value))")
             parameters = [:]
         }
         
@@ -150,18 +156,26 @@ public struct ToolCallItem: Codable {
     
     public struct ToolCallFunction: Codable {
         public let name: String
-        public let arguments: AnyCodable
+        public let arguments: AnyCodable?
         
         // Convert arguments to our FunctionCall format
         public func toFunctionCall() throws -> FunctionCall {
             let parameters: [String: Any]
             
+            // Handle optional arguments
+            guard let arguments = arguments else {
+                print("⚠️ [SDK] No arguments field, using empty parameters")
+                return FunctionCall(name: name, parameters: [:])
+            }
+            
             switch arguments.value {
             case let dict as [String: Any]:
                 // Arguments is already a dictionary
+                print("✅ [SDK] Arguments is dictionary with \(dict.count) keys")
                 parameters = dict
             case let string as String:
                 // Arguments is a JSON string - need to parse it
+                print("✅ [SDK] Arguments is string: \(string.prefix(100))")
                 if string.isEmpty || string == "{}" {
                     parameters = [:]
                 } else {
@@ -170,16 +184,17 @@ public struct ToolCallItem: Codable {
                         parameters = jsonObject
                     } else {
                         // If parsing fails, treat as empty parameters
-                        print("Warning: Could not parse function arguments JSON: \(string)")
+                        print("⚠️ [SDK] Could not parse function arguments JSON: \(string)")
                         parameters = [:]
                     }
                 }
             case is NSNull:
                 // Handle null case
+                print("✅ [SDK] Arguments is null")
                 parameters = [:]
             default:
                 // Handle any other case
-                print("Warning: Unexpected function arguments type: \(Swift.type(of: arguments.value))")
+                print("⚠️ [SDK] Unexpected function arguments type: \(Swift.type(of: arguments.value))")
                 parameters = [:]
             }
             

@@ -6,9 +6,10 @@ public struct Message: Codable {
         case assistant = "assistant"
         case system = "system"
         case tool = "tool"
+        case unknown = "unknown"
     }
     
-    public let role: Role
+    public let role: Role?
     public let content: String?
     public let toolCalls: [ToolCallItem]?
     public let toolCallId: String?
@@ -18,6 +19,32 @@ public struct Message: Codable {
         case content
         case toolCalls = "tool_calls"
         case toolCallId = "tool_call_id"
+    }
+    
+    // Custom decoding to handle unknown roles gracefully
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        
+        // Try to decode role, fall back to nil if it fails
+        if let roleString = try? container.decode(String.self, forKey: .role),
+           let decodedRole = Role(rawValue: roleString) {
+            role = decodedRole
+        } else {
+            print("⚠️ [SDK] Unknown role in Message, using nil")
+            role = nil
+        }
+        
+        content = try container.decodeIfPresent(String.self, forKey: .content)
+        toolCalls = try container.decodeIfPresent([ToolCallItem].self, forKey: .toolCalls)
+        toolCallId = try container.decodeIfPresent(String.self, forKey: .toolCallId)
+    }
+    
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(role, forKey: .role)
+        try container.encodeIfPresent(content, forKey: .content)
+        try container.encodeIfPresent(toolCalls, forKey: .toolCalls)
+        try container.encodeIfPresent(toolCallId, forKey: .toolCallId)
     }
 }
 
