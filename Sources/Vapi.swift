@@ -514,19 +514,11 @@ public final class Vapi: CallClientDelegate {
                 throw error
             }
             
-            // Only log function call, tool-calls, and model-output with arrays (potential tool calls)
-            if appMessage.type == .functionCall || appMessage.type == .toolCalls {
-                if let unescapedString = unescapedString {
-                    print("🔧 [SDK] \(appMessage.type.rawValue): \(unescapedString.prefix(200))")
-                }
-            }
-            
             // Parse the JSON data again, this time using the specific type
             let event: Event
             switch appMessage.type {
             case .functionCall:
                 let functionCallMessage = try decoder.decode(FunctionCallMessage.self, from: unescapedData)
-                print("✅ [SDK] Function call: \(functionCallMessage.functionCall.name)")
                 event = Event.functionCall(functionCallMessage.functionCall)
             case .modelOutput:
                 // Try to parse as function call format first
@@ -535,7 +527,6 @@ public final class Vapi: CallClientDelegate {
                     // Extract function calls from model output
                     if let toolCallItem = modelOutputMessage.output.first(where: { $0.type == "function" }) {
                         let functionCall = try toolCallItem.toFunctionCall()
-                        print("✅ [SDK] Function call from model-output: \(functionCall.name)")
                         event = Event.functionCall(functionCall)
                     } else {
                         // No function calls found, skip
@@ -556,13 +547,11 @@ public final class Vapi: CallClientDelegate {
                     // Extract function calls from tool calls
                     if let toolCallItem = toolCallsMessage.toolCalls.first(where: { $0.type == "function" }) {
                         let functionCall = try toolCallItem.toFunctionCall()
-                        print("✅ [SDK] Function call from tool-calls: \(functionCall.name)")
                         event = Event.functionCall(functionCall)
                     } else {
                         return
                     }
                 } catch {
-                    print("❌ [SDK] Failed to parse tool-calls: \(error)")
                     return
                 }
             case .hang:
@@ -586,10 +575,9 @@ public final class Vapi: CallClientDelegate {
                             for toolCall in toolCalls where toolCall.type == "function" {
                                 do {
                                     let functionCall = try toolCall.toFunctionCall()
-                                    print("✅ [SDK] Function call from conversation: \(functionCall.name)")
                                     eventSubject.send(.functionCall(functionCall))
                                 } catch {
-                                    print("❌ [SDK] Failed to convert tool call: \(error)")
+                                    // Silently handle conversion errors
                                 }
                             }
                         }

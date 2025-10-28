@@ -30,7 +30,6 @@ public struct Message: Codable {
            let decodedRole = Role(rawValue: roleString) {
             role = decodedRole
         } else {
-            print("⚠️ [SDK] Unknown role in Message, using nil")
             role = nil
         }
         

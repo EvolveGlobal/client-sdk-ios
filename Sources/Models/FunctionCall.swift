@@ -125,7 +125,6 @@ public struct ToolCallItem: Codable {
         
         // Handle optional arguments
         guard let arguments = function.arguments else {
-            print("⚠️ [SDK] ToolCallItem: No arguments field, using empty parameters")
             return FunctionCall(id: id, name: function.name, parameters: [:])
         }
         
@@ -140,14 +139,12 @@ public struct ToolCallItem: Codable {
                 if let jsonObject = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                     parameters = jsonObject
                 } else {
-                    print("⚠️ [SDK] Could not parse function arguments JSON: \(string)")
                     parameters = [:]
                 }
             }
         case is NSNull:
             parameters = [:]
         default:
-            print("⚠️ [SDK] Unexpected function arguments type: \(Swift.type(of: arguments.value))")
             parameters = [:]
         }
         
@@ -164,18 +161,13 @@ public struct ToolCallItem: Codable {
             
             // Handle optional arguments
             guard let arguments = arguments else {
-                print("⚠️ [SDK] No arguments field, using empty parameters")
                 return FunctionCall(name: name, parameters: [:])
             }
             
             switch arguments.value {
             case let dict as [String: Any]:
-                // Arguments is already a dictionary
-                print("✅ [SDK] Arguments is dictionary with \(dict.count) keys")
                 parameters = dict
             case let string as String:
-                // Arguments is a JSON string - need to parse it
-                print("✅ [SDK] Arguments is string: \(string.prefix(100))")
                 if string.isEmpty || string == "{}" {
                     parameters = [:]
                 } else {
@@ -183,18 +175,12 @@ public struct ToolCallItem: Codable {
                     if let jsonObject = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                         parameters = jsonObject
                     } else {
-                        // If parsing fails, treat as empty parameters
-                        print("⚠️ [SDK] Could not parse function arguments JSON: \(string)")
                         parameters = [:]
                     }
                 }
             case is NSNull:
-                // Handle null case
-                print("✅ [SDK] Arguments is null")
                 parameters = [:]
             default:
-                // Handle any other case
-                print("⚠️ [SDK] Unexpected function arguments type: \(Swift.type(of: arguments.value))")
                 parameters = [:]
             }
             
