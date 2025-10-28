@@ -56,7 +56,13 @@ public final class Vapi: CallClientDelegate {
         case callDidStart
         case callDidEnd
         case transcript(Transcript)
+        
+        // LEGACY: Direct function-call messages (kept for backward compatibility)
         case functionCall(FunctionCall)
+        
+        // NEW: Tool calls from model-output, tool-calls, and conversation-update messages
+        case toolCall(FunctionCall)
+        
         case speechUpdate(SpeechUpdate)
         case metadata(Metadata)
         case conversationUpdate(ConversationUpdate)
@@ -525,23 +531,23 @@ public final class Vapi: CallClientDelegate {
                 let functionCallMessage = try decoder.decode(FunctionCallMessage.self, from: unescapedData)
                 event = Event.functionCall(functionCallMessage.functionCall)
             case .modelOutput:
-                // CHANGE: Added parsing logic to extract function calls from model-output messages
-                // WHY: Vapi sends function calls in model-output messages with an array format,
-                // which needs special handling. We try to parse as function calls first,
+                // CHANGE: Added parsing logic to extract tool calls from model-output messages
+                // WHY: Vapi sends tool calls in model-output messages with an array format,
+                // which needs special handling. We try to parse as tool calls first,
                 // then fall back to regular text output if that fails
                 do {
                     let modelOutputMessage = try decoder.decode(ModelOutputMessage.self, from: unescapedData)
-                    // Extract function calls from the output array (filter by type "function")
+                    // Extract tool calls from the output array (filter by type "function")
                     if let toolCallItem = modelOutputMessage.output.first(where: { $0.type == "function" }) {
-                        let functionCall = try toolCallItem.toFunctionCall()
-                        event = Event.functionCall(functionCall)
+                        let toolCall = try toolCallItem.toFunctionCall()
+                        event = Event.toolCall(toolCall)
                     } else {
-                        // No function calls found in output, skip this message
+                        // No tool calls found in output, skip this message
                         return
                     }
                 } catch {
                     // Fall back to original ModelOutput format (string-based output)
-                    // This handles regular model responses that aren't function calls
+                    // This handles regular model responses that aren't tool calls
                     do {
                         let modelOutput = try decoder.decode(ModelOutput.self, from: unescapedData)
                         event = Event.modelOutput(modelOutput)
@@ -550,15 +556,15 @@ public final class Vapi: CallClientDelegate {
                     }
                 }
             case .toolCalls:
-                // CHANGE: Added parsing logic for tool-calls message type
-                // WHY: Vapi sends function calls via dedicated "tool-calls" messages
+                // CHANGE: Added parsing logic for tool-calls message type (PRIMARY FORMAT)
+                // WHY: Vapi sends tool calls via dedicated "tool-calls" messages
                 // that contain an array of tool invocations
                 do {
                     let toolCallsMessage = try decoder.decode(ToolCallsMessage.self, from: unescapedData)
-                    // Extract function calls from the toolCalls array
+                    // Extract tool calls from the toolCalls array
                     if let toolCallItem = toolCallsMessage.toolCalls.first(where: { $0.type == "function" }) {
-                        let functionCall = try toolCallItem.toFunctionCall()
-                        event = Event.functionCall(functionCall)
+                        let toolCall = try toolCallItem.toFunctionCall()
+                        event = Event.toolCall(toolCall)
                     } else {
                         // No function-type tool calls, skip
                         return
@@ -579,9 +585,9 @@ public final class Vapi: CallClientDelegate {
                 let metadata = try decoder.decode(Metadata.self, from: unescapedData)
                 event = Event.metadata(metadata)
             case .conversationUpdate:
-                // CHANGE: Added extraction of function calls from conversation history
+                // CHANGE: Added extraction of tool calls from conversation history
                 // WHY: Vapi includes tool_calls in conversation-update messages as part of
-                // the conversation history. We need to extract and emit these as function call
+                // the conversation history. We need to extract and emit these as tool call
                 // events so the app can respond to them
                 do {
                     let conv = try decoder.decode(ConversationUpdate.self, from: unescapedData)
@@ -589,11 +595,11 @@ public final class Vapi: CallClientDelegate {
                     // Scan conversation history for tool calls
                     for message in conv.conversation {
                         if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
-                            for toolCall in toolCalls where toolCall.type == "function" {
+                            for toolCallItem in toolCalls where toolCallItem.type == "function" {
                                 do {
-                                    let functionCall = try toolCall.toFunctionCall()
-                                    // Emit function call event immediately (doesn't wait for main event)
-                                    eventSubject.send(.functionCall(functionCall))
+                                    let toolCall = try toolCallItem.toFunctionCall()
+                                    // Emit tool call event immediately (doesn't wait for main event)
+                                    eventSubject.send(.toolCall(toolCall))
                                 } catch {
                                     // Silently skip if conversion fails
                                 }

@@ -77,8 +77,9 @@ final class VapiTests: XCTestCase {
         XCTAssertEqual(toolCall.type, "function")
         XCTAssertEqual(toolCall.function.name, "showSleepCoachInstructions")
         
-        // Test conversion to FunctionCall
-        let functionCall = try toolCall.function.toFunctionCall()
+        // Test conversion to FunctionCall (preserves ID from ToolCallItem)
+        let functionCall = try toolCall.toFunctionCall()
+        XCTAssertEqual(functionCall.id, "call_123")
         XCTAssertEqual(functionCall.name, "showSleepCoachInstructions")
         XCTAssertTrue(functionCall.parameters.isEmpty)
     }
@@ -117,8 +118,9 @@ final class VapiTests: XCTestCase {
         XCTAssertEqual(toolCall.type, "function")
         XCTAssertEqual(toolCall.function.name, "getUserPreferences")
         
-        // Test conversion to FunctionCall
-        let functionCall = try toolCall.function.toFunctionCall()
+        // Test conversion to FunctionCall (preserves ID from ToolCallItem)
+        let functionCall = try toolCall.toFunctionCall()
+        XCTAssertEqual(functionCall.id, "call_456")
         XCTAssertEqual(functionCall.name, "getUserPreferences")
         XCTAssertEqual(functionCall.parameters["userId"] as? String, "123")
         XCTAssertEqual(functionCall.parameters["includePrivate"] as? Bool, true)
