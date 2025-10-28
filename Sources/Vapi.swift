@@ -194,15 +194,8 @@ public final class Vapi: CallClientDelegate {
         
         do {
             let jsonData = try JSONEncoder().encode(response)
-            
-            // Debugging: Print the response being sent
-            if let jsonString = String(data: jsonData, encoding: .utf8) {
-                print("Sending function call response: \(jsonString)")
-            }
-            
             try await self.call?.sendAppMessage(json: jsonData, to: .all)
         } catch {
-            print("Error encoding function call response to JSON: \(error)")
             throw error
         }
     }
@@ -525,40 +518,23 @@ public final class Vapi: CallClientDelegate {
             switch appMessage.type {
             case .functionCall:
                 // LEGACY: Direct function-call messages (kept for backward compatibility)
-                // NOTE: Current Vapi versions send function calls via tool-calls, model-output,
-                // and conversation-update messages instead. This handler remains for older
-                // Vapi versions or edge cases
+                // NOTE: Current Vapi versions send tool calls via dedicated tool-calls messages.
+                // This handler remains for older Vapi versions or edge cases
                 let functionCallMessage = try decoder.decode(FunctionCallMessage.self, from: unescapedData)
                 event = Event.functionCall(functionCallMessage.functionCall)
             case .modelOutput:
-                // CHANGE: Added parsing logic to extract tool calls from model-output messages
-                // WHY: Vapi sends tool calls in model-output messages with an array format,
-                // which needs special handling. We try to parse as tool calls first,
-                // then fall back to regular text output if that fails
+                // Parse regular model output (text responses)
+                // NOTE: Tool calls are handled via .toolCalls message type, not here
                 do {
-                    let modelOutputMessage = try decoder.decode(ModelOutputMessage.self, from: unescapedData)
-                    // Extract tool calls from the output array (filter by type "function")
-                    if let toolCallItem = modelOutputMessage.output.first(where: { $0.type == "function" }) {
-                        let toolCall = try toolCallItem.toToolCall()
-                        event = Event.toolCall(toolCall)
-                    } else {
-                        // No tool calls found in output, skip this message
-                        return
-                    }
+                    let modelOutput = try decoder.decode(ModelOutput.self, from: unescapedData)
+                    event = Event.modelOutput(modelOutput)
                 } catch {
-                    // Fall back to original ModelOutput format (string-based output)
-                    // This handles regular model responses that aren't tool calls
-                    do {
-                        let modelOutput = try decoder.decode(ModelOutput.self, from: unescapedData)
-                        event = Event.modelOutput(modelOutput)
-                    } catch {
-                        return
-                    }
+                    // Silently skip if parsing fails
+                    return
                 }
             case .toolCalls:
-                // CHANGE: Added parsing logic for tool-calls message type (PRIMARY FORMAT)
-                // WHY: Vapi sends tool calls via dedicated "tool-calls" messages
-                // that contain an array of tool invocations
+                // Parse tool calls from dedicated tool-calls messages
+                // This is the ONLY place we parse tool calls for simplicity
                 do {
                     let toolCallsMessage = try decoder.decode(ToolCallsMessage.self, from: unescapedData)
                     // Extract tool calls from the toolCalls array
@@ -585,43 +561,19 @@ public final class Vapi: CallClientDelegate {
                 let metadata = try decoder.decode(Metadata.self, from: unescapedData)
                 event = Event.metadata(metadata)
             case .conversationUpdate:
-                // CHANGE: Added extraction of tool calls from conversation history
-                // WHY: Vapi includes tool_calls in conversation-update messages as part of
-                // the conversation history. We need to extract and emit these as tool call
-                // events so the app can respond to them
+                // Parse conversation history
+                // NOTE: Tool calls are handled via .toolCalls message type, not extracted from history
                 do {
                     let conv = try decoder.decode(ConversationUpdate.self, from: unescapedData)
-                    
-                    // Scan conversation history for tool calls
-                    for message in conv.conversation {
-                        if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
-                            for toolCallItem in toolCalls where toolCallItem.type == "function" {
-                                do {
-                                    let toolCall = try toolCallItem.toToolCall()
-                                    // Emit tool call event immediately (doesn't wait for main event)
-                                    eventSubject.send(.toolCall(toolCall))
-                                } catch {
-                                    // Silently skip if conversion fails
-                                }
-                            }
-                        }
-                    }
-                    
                     event = Event.conversationUpdate(conv)
-                } catch let convError {
-                    print("Failed to parse conversation-update: \(convError)")
-                    if let debugString = String(data: unescapedData, encoding: .utf8) {
-                        print("Failed conversation-update JSON (first 300 chars): \(debugString.prefix(300))")
-                    }
-                    // Don't throw - gracefully skip malformed messages
+                } catch {
+                    // Silently skip malformed conversation updates
+                    // (Vapi sometimes sends JSON with unescaped newlines in system prompts)
                     return
                 }
             case .statusUpdate:
                 let statusUpdate = try decoder.decode(StatusUpdate.self, from: unescapedData)
                 event = Event.statusUpdate(statusUpdate)
-            case .modelOutput:
-                let modelOutput = try decoder.decode(ModelOutput.self, from: unescapedData)
-                event = Event.modelOutput(modelOutput)
             case .userInterrupted:
                 let userInterrupted = UserInterrupted()
                 event = Event.userInterrupted(userInterrupted)
