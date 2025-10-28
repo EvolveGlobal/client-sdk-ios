@@ -58,32 +58,9 @@ public struct Message: Codable {
     }
 }
 
-public struct ConversationMessage: Codable {
-    public enum Role: String, Codable {
-        case system = "system"
-        case bot = "bot"
-        case user = "user"
-        case toolCalls = "tool_calls"
-        case toolCallResult = "tool_call_result"
-    }
-    
-    public let role: Role
-    public let message: String?
-    public let time: Double?
-    public let endTime: Double?
-    public let secondsFromStart: Double?
-    public let duration: Double?
-    public let source: String?
-    public let toolCalls: [ToolCallItem]?
-    public let name: String?
-    public let result: String?
-    public let toolCallId: String?
-    
-
-}
-
 public struct ConversationUpdate: Codable {
+    // CHANGE: Modified to parse conversation history containing tool calls
+    // WHY: We extract function calls from the conversation array (which is [Message]).
+    // The Message struct was enhanced to include toolCalls field for function call extraction
     public let conversation: [Message]
-    public let messages: [ConversationMessage]?
-    public let messagesOpenAIFormatted: [AnyCodable]?
 }
