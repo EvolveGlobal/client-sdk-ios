@@ -61,7 +61,7 @@ public final class Vapi: CallClientDelegate {
         case functionCall(FunctionCall)
         
         // NEW: Tool calls from model-output, tool-calls, and conversation-update messages
-        case toolCall(FunctionCall)
+        case toolCall(ToolCall)
         
         case speechUpdate(SpeechUpdate)
         case metadata(Metadata)
@@ -539,7 +539,7 @@ public final class Vapi: CallClientDelegate {
                     let modelOutputMessage = try decoder.decode(ModelOutputMessage.self, from: unescapedData)
                     // Extract tool calls from the output array (filter by type "function")
                     if let toolCallItem = modelOutputMessage.output.first(where: { $0.type == "function" }) {
-                        let toolCall = try toolCallItem.toFunctionCall()
+                        let toolCall = try toolCallItem.toToolCall()
                         event = Event.toolCall(toolCall)
                     } else {
                         // No tool calls found in output, skip this message
@@ -563,7 +563,7 @@ public final class Vapi: CallClientDelegate {
                     let toolCallsMessage = try decoder.decode(ToolCallsMessage.self, from: unescapedData)
                     // Extract tool calls from the toolCalls array
                     if let toolCallItem = toolCallsMessage.toolCalls.first(where: { $0.type == "function" }) {
-                        let toolCall = try toolCallItem.toFunctionCall()
+                        let toolCall = try toolCallItem.toToolCall()
                         event = Event.toolCall(toolCall)
                     } else {
                         // No function-type tool calls, skip
@@ -597,7 +597,7 @@ public final class Vapi: CallClientDelegate {
                         if let toolCalls = message.toolCalls, !toolCalls.isEmpty {
                             for toolCallItem in toolCalls where toolCallItem.type == "function" {
                                 do {
-                                    let toolCall = try toolCallItem.toFunctionCall()
+                                    let toolCall = try toolCallItem.toToolCall()
                                     // Emit tool call event immediately (doesn't wait for main event)
                                     eventSubject.send(.toolCall(toolCall))
                                 } catch {

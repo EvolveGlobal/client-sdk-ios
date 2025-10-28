@@ -65,10 +65,10 @@ public struct AnyCodable: Codable {
     }
 }
 
-// MARK: - Shared Model (Used by both legacy and new formats)
+// MARK: - Legacy Format Model
 
-/// Represents a function/tool call with name and parameters
-/// Used by both legacy function-call messages and modern tool-calls messages
+/// LEGACY: Represents a function call from old "function-call" messages
+/// Kept for backward compatibility with older Vapi versions
 public struct FunctionCall: Codable {
     public let id: String?
     public let name: String
@@ -112,6 +112,53 @@ public struct FunctionCall: Codable {
     }
 }
 
+// MARK: - Modern Format Model
+
+/// Represents a tool call from modern Vapi formats (model-output, tool-calls, conversation-update)
+/// This is the current/active format used by Vapi
+public struct ToolCall: Codable {
+    public let id: String
+    public let name: String
+    public let parameters: [String: Any]
+    
+    public init(id: String, name: String, parameters: [String: Any]) {
+        self.id = id
+        self.name = name
+        self.parameters = parameters
+    }
+    
+    // Custom coding implementation to handle [String: Any] parameters
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        
+        // Decode parameters as AnyCodable and convert
+        if let parametersValue = try? container.decode(AnyCodable.self, forKey: .parameters) {
+            if let dict = parametersValue.value as? [String: Any] {
+                parameters = dict
+            } else {
+                parameters = [:]
+            }
+        } else {
+            parameters = [:]
+        }
+    }
+    
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(AnyCodable(parameters), forKey: .parameters)
+    }
+    
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case parameters
+    }
+}
+
 // MARK: - Legacy Format (function-call message)
 
 /// LEGACY: Model for direct "function-call" message type
@@ -133,15 +180,14 @@ public struct ToolCallItem: Codable {
     public let function: ToolCallFunction
     public let isPrecededByText: Bool?
     
-    /// Converts the ToolCallItem to a standardized FunctionCall
-    /// This unifies the nested tool call structure into the same FunctionCall model
-    /// used throughout the SDK
-    public func toFunctionCall() throws -> FunctionCall {
+    /// Converts the ToolCallItem to a ToolCall
+    /// This normalizes the nested tool call structure from Vapi into a clean model
+    public func toToolCall() throws -> ToolCall {
         let parameters: [String: Any]
         
         // Handle optional arguments (may be missing for parameterless functions)
         guard let arguments = function.arguments else {
-            return FunctionCall(id: id, name: function.name, parameters: [:])
+            return ToolCall(id: id, name: function.name, parameters: [:])
         }
         
         // Parse arguments which can be in multiple formats:
@@ -169,11 +215,11 @@ public struct ToolCallItem: Codable {
             parameters = [:]
         }
         
-        return FunctionCall(id: id, name: function.name, parameters: parameters)
+        return ToolCall(id: id, name: function.name, parameters: parameters)
     }
     
     /// Nested function details within a ToolCallItem
-    /// To convert to FunctionCall, use ToolCallItem.toFunctionCall() which preserves the tool call ID
+    /// To convert to ToolCall, use ToolCallItem.toToolCall()
     public struct ToolCallFunction: Codable {
         public let name: String
         /// Optional arguments - may be omitted for parameterless functions
