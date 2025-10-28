@@ -6,11 +6,18 @@ public struct Message: Codable {
         case assistant = "assistant"
         case system = "system"
         case tool = "tool"
+        // CHANGE: Added unknown case to handle unexpected role values
+        // WHY: Prevents decoding failures if Vapi adds new role types in the future
         case unknown = "unknown"
     }
     
+    // CHANGE: Made role optional (Role?)
+    // WHY: Vapi may send messages without a role field, or with unrecognized role values.
+    // Making it optional prevents the entire conversation-update message from failing to parse
     public let role: Role?
     public let content: String?
+    // CHANGE: Added toolCalls field to parse function calls from conversation history
+    // WHY: Vapi includes tool_calls in conversation-update messages for tracking assistant function invocations
     public let toolCalls: [ToolCallItem]?
     public let toolCallId: String?
     
@@ -21,7 +28,9 @@ public struct Message: Codable {
         case toolCallId = "tool_call_id"
     }
     
-    // Custom decoding to handle unknown roles gracefully
+    // CHANGE: Added custom decoding to gracefully handle missing or unknown roles
+    // WHY: Default Codable decoding would fail the entire message if role is invalid.
+    // Custom decoding allows us to continue parsing even with missing/unknown roles
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         
@@ -30,6 +39,7 @@ public struct Message: Codable {
            let decodedRole = Role(rawValue: roleString) {
             role = decodedRole
         } else {
+            // Silently handle unknown/missing roles
             role = nil
         }
         

@@ -112,22 +112,31 @@ public struct FunctionCallMessage: Codable {
     public let functionCall: FunctionCall
 }
 
-// Model for tool call item (used in both model-output and tool-calls messages)
+// CHANGE: Added ToolCallItem model to parse tool calls from Vapi messages
+// WHY: Vapi sends tool calls in multiple message formats (model-output, tool-calls, conversation-update)
+// that use a nested structure different from the direct function-call message format
 public struct ToolCallItem: Codable {
     public let id: String
     public let type: String
     public let function: ToolCallFunction
     public let isPrecededByText: Bool?
     
-    // Convenience method to create FunctionCall with the correct ID
+    /// Converts the ToolCallItem to a standardized FunctionCall
+    /// WHY: Unifies different message formats into a single FunctionCall event for the app
     public func toFunctionCall() throws -> FunctionCall {
         let parameters: [String: Any]
         
-        // Handle optional arguments
+        // CHANGE: Made arguments optional to handle cases where function has no parameters
+        // WHY: Vapi sometimes omits the arguments field entirely for parameterless functions
         guard let arguments = function.arguments else {
             return FunctionCall(id: id, name: function.name, parameters: [:])
         }
         
+        // CHANGE: Handle multiple argument formats (dictionary, JSON string, null)
+        // WHY: Vapi inconsistently sends arguments as either:
+        // - A dictionary: {"key": "value"}
+        // - A JSON string: "{\"key\":\"value\"}" or "{}"
+        // - Null/omitted entirely
         switch arguments.value {
         case let dict as [String: Any]:
             parameters = dict
@@ -139,6 +148,7 @@ public struct ToolCallItem: Codable {
                 if let jsonObject = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
                     parameters = jsonObject
                 } else {
+                    // Silently fall back to empty parameters if parsing fails
                     parameters = [:]
                 }
             }
@@ -153,17 +163,19 @@ public struct ToolCallItem: Codable {
     
     public struct ToolCallFunction: Codable {
         public let name: String
+        // CHANGE: Made arguments optional (AnyCodable?)
+        // WHY: Vapi may omit the arguments field for functions with no parameters
         public let arguments: AnyCodable?
         
-        // Convert arguments to our FunctionCall format
+        /// Converts to FunctionCall format without an ID (for legacy compatibility)
         public func toFunctionCall() throws -> FunctionCall {
             let parameters: [String: Any]
             
-            // Handle optional arguments
             guard let arguments = arguments else {
                 return FunctionCall(name: name, parameters: [:])
             }
             
+            // Same argument parsing logic as ToolCallItem.toFunctionCall()
             switch arguments.value {
             case let dict as [String: Any]:
                 parameters = dict
@@ -189,22 +201,26 @@ public struct ToolCallItem: Codable {
     }
 }
 
-// Model for model-output messages that contain function calls
+// CHANGE: Added ModelOutputMessage to parse model-output messages from Vapi
+// WHY: Vapi sends function calls in "model-output" messages with an "output" array of ToolCallItems
 public struct ModelOutputMessage: Codable {
     public let type: String
     public let output: [ToolCallItem]
 }
 
-// Model for tool-calls messages  
+// CHANGE: Added ToolCallsMessage to parse tool-calls messages from Vapi
+// WHY: Vapi sends function calls in "tool-calls" messages with a "toolCalls" array
 public struct ToolCallsMessage: Codable {
     public let type: String
     public let toolCalls: [ToolCallItem]
     
-    // Optional additional fields that might be present
+    // CHANGE: Added optional fields for comprehensive message parsing
+    // WHY: Vapi messages may include additional metadata fields. Making them optional
+    // allows parsing to succeed even when these fields are missing
     public let toolCallList: [ToolCallItem]?
     public let toolWithToolCallList: [ToolWithCallItem]?
     
-    // Additional tool call structure for toolWithToolCallList
+    /// Additional tool call metadata structure that may be present in some messages
     public struct ToolWithCallItem: Codable {
         public let type: String?
         public let function: ToolFunctionDefinition?
