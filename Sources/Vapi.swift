@@ -377,47 +377,24 @@ public final class Vapi: CallClientDelegate {
         }
     }
     
-    private func unescapeAppMessage(_ jsonData: Data) -> (Data, String?) {
-        guard let jsonString = String(data: jsonData, encoding: .utf8) else {
-            return (jsonData, nil)
-        }
-
-        // Check if the string is already valid JSON (not double-encoded)
-        if let _ = try? JSONSerialization.jsonObject(with: jsonData) {
-            // Data is already valid JSON, no unescaping needed
+    /// Normalizes app message payload: if it's JSON object/array use as-is; if it's a JSON string (double-encoded) unwrap to inner data.
+    /// No sanitization—payloads are valid; we only handle object vs string format.
+    /// Uses .fragmentsAllowed so a top-level JSON string (e.g. "{\"type\":\"...\"}") is accepted and unwrapped.
+    private func normalizedAppMessageData(_ jsonData: Data) -> (Data, String?) {
+        let jsonString = String(data: jsonData, encoding: .utf8)
+        guard let parsed = try? JSONSerialization.jsonObject(with: jsonData, options: .fragmentsAllowed) else {
             return (jsonData, jsonString)
         }
-        
-        // Check if it's a string wrapped in quotes that needs unescaping
-        if jsonString.hasPrefix("\"") && jsonString.hasSuffix("\"") {
-            // Remove the leading and trailing double quotes
-            let trimmedString = String(jsonString.dropFirst().dropLast())
-            
-            // Try to decode the JSON string using JSONSerialization for proper unescaping
-            if let data = trimmedString.data(using: .utf8),
-               let jsonObject = try? JSONSerialization.jsonObject(with: data),
-               let properData = try? JSONSerialization.data(withJSONObject: jsonObject) {
-                let properString = String(data: properData, encoding: .utf8)
-                return (properData, properString)
-            }
-            
-            // Fallback to manual unescaping if JSONSerialization fails
-            let unescapedString = trimmedString
-                .replacingOccurrences(of: "\\\\", with: "\\")
-                .replacingOccurrences(of: "\\\"", with: "\"")
-                .replacingOccurrences(of: "\\/", with: "/")
-                .replacingOccurrences(of: "\\n", with: "\n")
-                .replacingOccurrences(of: "\\r", with: "\r")
-                .replacingOccurrences(of: "\\t", with: "\t")
-            
-            let unescapedData = unescapedString.data(using: .utf8) ?? jsonData
-            return (unescapedData, unescapedString)
+        if let innerString = parsed as? String,
+           let innerData = innerString.data(using: .utf8) {
+            return (innerData, innerString)
         }
-
-        // Return original data if no processing needed
+        if parsed is [String: Any] || parsed is [Any] {
+            return (jsonData, jsonString)
+        }
         return (jsonData, jsonString)
     }
-    
+
     public func startLocalAudioLevelObserver() async throws {
         do {
             try await call?.startLocalAudioLevelObserver()
@@ -491,25 +468,19 @@ public final class Vapi: CallClientDelegate {
     
     public func callClient(_ callClient: Daily.CallClient, appMessageAsJson jsonData: Data, from participantID: Daily.ParticipantID) {
         do {
-            let (unescapedData, unescapedString) = unescapeAppMessage(jsonData)
-            
-            // Detect listening message first since it's a string rather than JSON
-            guard unescapedString != "listening" else {
+            let (dataToUse, payloadString) = normalizedAppMessageData(jsonData)
+
+            // Detect listening message (plain string, not JSON object)
+            if payloadString == "listening" {
                 eventSubject.send(.callDidStart)
                 return
             }
-            
-            // Parse the JSON data generically to determine the type of event
+
             let decoder = JSONDecoder()
             let appMessage: AppMessage
-            
             do {
-                appMessage = try decoder.decode(AppMessage.self, from: unescapedData)
+                appMessage = try decoder.decode(AppMessage.self, from: dataToUse)
             } catch {
-                print("Failed to decode AppMessage: \(error)")
-                if let debugString = String(data: unescapedData, encoding: .utf8) {
-                    print("JSON that failed to parse: \(debugString.prefix(500))")
-                }
                 throw error
             }
             
@@ -520,13 +491,13 @@ public final class Vapi: CallClientDelegate {
                 // LEGACY: Direct function-call messages (kept for backward compatibility)
                 // NOTE: Current Vapi versions send tool calls via dedicated tool-calls messages.
                 // This handler remains for older Vapi versions or edge cases
-                let functionCallMessage = try decoder.decode(FunctionCallMessage.self, from: unescapedData)
+                let functionCallMessage = try decoder.decode(FunctionCallMessage.self, from: dataToUse)
                 event = Event.functionCall(functionCallMessage.functionCall)
             case .modelOutput:
                 // Parse regular model output (text responses)
                 // NOTE: Tool calls are handled via .toolCalls message type, not here
                 do {
-                    let modelOutput = try decoder.decode(ModelOutput.self, from: unescapedData)
+                    let modelOutput = try decoder.decode(ModelOutput.self, from: dataToUse)
                     event = Event.modelOutput(modelOutput)
                 } catch {
                     // Silently skip if parsing fails
@@ -536,7 +507,7 @@ public final class Vapi: CallClientDelegate {
                 // Parse tool calls from dedicated tool-calls messages
                 // This is the ONLY place we parse tool calls for simplicity
                 do {
-                    let toolCallsMessage = try decoder.decode(ToolCallsMessage.self, from: unescapedData)
+                    let toolCallsMessage = try decoder.decode(ToolCallsMessage.self, from: dataToUse)
                     // Extract tool calls from the toolCalls array
                     if let toolCallItem = toolCallsMessage.toolCalls.first(where: { $0.type == "function" }) {
                         let toolCall = try toolCallItem.toToolCall()
@@ -552,58 +523,30 @@ public final class Vapi: CallClientDelegate {
             case .hang:
                 event = Event.hang
             case .transcript:
-                let transcript = try decoder.decode(Transcript.self, from: unescapedData)
+                let transcript = try decoder.decode(Transcript.self, from: dataToUse)
                 event = Event.transcript(transcript)
             case .speechUpdate:
-                let speechUpdate = try decoder.decode(SpeechUpdate.self, from: unescapedData)
+                let speechUpdate = try decoder.decode(SpeechUpdate.self, from: dataToUse)
                 event = Event.speechUpdate(speechUpdate)
             case .metadata:
-                let metadata = try decoder.decode(Metadata.self, from: unescapedData)
+                let metadata = try decoder.decode(Metadata.self, from: dataToUse)
                 event = Event.metadata(metadata)
             case .conversationUpdate:
-                // Parse conversation history
-                // NOTE: Tool calls are handled via .toolCalls message type, not extracted from history
-                do {
-                    let conv = try decoder.decode(ConversationUpdate.self, from: unescapedData)
-                    event = Event.conversationUpdate(conv)
-                } catch {
-                    // Silently skip malformed conversation updates
-                    // (Vapi sometimes sends JSON with unescaped newlines in system prompts)
-                    return
-                }
+                let conv = try decoder.decode(ConversationUpdate.self, from: dataToUse)
+                event = Event.conversationUpdate(conv)
             case .statusUpdate:
-                let statusUpdate = try decoder.decode(StatusUpdate.self, from: unescapedData)
+                let statusUpdate = try decoder.decode(StatusUpdate.self, from: dataToUse)
                 event = Event.statusUpdate(statusUpdate)
             case .userInterrupted:
                 let userInterrupted = UserInterrupted()
                 event = Event.userInterrupted(userInterrupted)
             case .voiceInput:
-                let voiceInput = try decoder.decode(VoiceInput.self, from: unescapedData)
+                let voiceInput = try decoder.decode(VoiceInput.self, from: dataToUse)
                 event = Event.voiceInput(voiceInput)
             }
             eventSubject.send(event)
         } catch {
-            let messageText = String(data: jsonData, encoding: .utf8)
-            print("Error parsing app message \"\(messageText ?? "")\": \(error.localizedDescription)")
-            
-            // Additional debugging for conversation-update errors
-            if let messageText = messageText, messageText.contains("conversation-update") {
-                print("Detailed conversation-update parsing error: \(error)")
-                if let decodingError = error as? DecodingError {
-                    switch decodingError {
-                    case .typeMismatch(let type, let context):
-                        print("Type mismatch: Expected \(type), path: \(context.codingPath)")
-                    case .valueNotFound(let type, let context):
-                        print("Value not found: \(type), path: \(context.codingPath)")
-                    case .keyNotFound(let key, let context):
-                        print("Key not found: \(key), path: \(context.codingPath)")
-                    case .dataCorrupted(let context):
-                        print("Data corrupted, path: \(context.codingPath)")
-                    @unknown default:
-                        print("Unknown decoding error")
-                    }
-                }
-            }
+            // Parsing failed; event not sent
         }
     }
 }
