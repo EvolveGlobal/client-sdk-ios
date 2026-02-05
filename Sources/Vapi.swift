@@ -483,7 +483,7 @@ public final class Vapi: CallClientDelegate {
             } catch {
                 throw error
             }
-            
+
             // Parse the JSON data again, this time using the specific type
             let event: Event
             switch appMessage.type {
@@ -504,20 +504,17 @@ public final class Vapi: CallClientDelegate {
                     return
                 }
             case .toolCalls:
-                // Parse tool calls from dedicated tool-calls messages
-                // This is the ONLY place we parse tool calls for simplicity
+                // Parse tool calls from dedicated tool-calls messages; emit each function-type call
                 do {
                     let toolCallsMessage = try decoder.decode(ToolCallsMessage.self, from: dataToUse)
-                    // Extract tool calls from the toolCalls array
-                    if let toolCallItem = toolCallsMessage.toolCalls.first(where: { $0.type == "function" }) {
+                    let functionCalls = toolCallsMessage.toolCalls.filter { $0.type == "function" }
+                    guard !functionCalls.isEmpty else { return }
+                    for toolCallItem in functionCalls {
                         let toolCall = try toolCallItem.toToolCall()
-                        event = Event.toolCall(toolCall)
-                    } else {
-                        // No function-type tool calls, skip
-                        return
+                        eventSubject.send(Event.toolCall(toolCall))
                     }
+                    return
                 } catch {
-                    // Silently fail - parsing errors shouldn't crash the app
                     return
                 }
             case .hang:
